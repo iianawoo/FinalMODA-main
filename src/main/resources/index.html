@@ -195,6 +195,15 @@
   }
 
   .product-emoji { font-size:2.4rem; margin-bottom:12px; display:block; }
+  .product-img {
+    width: 100%;
+    height: 200px;
+    object-fit: cover;
+    border-radius: 10px;
+    margin-bottom: 12px;
+    background: var(--blush); /* пока грузится — розовый фон */
+    display: block;
+  }
   .product-category {
     font-size:0.68rem; text-transform:uppercase; letter-spacing:0.1em;
     color:var(--muted); margin-bottom:6px;
@@ -726,7 +735,11 @@ function renderProducts(products) {
   const grid = document.getElementById('productsGrid');
   grid.innerHTML = products.map(p => `
     <div class="product-card ${cart.find(c=>c.id===p.id)?'in-cart':''}" id="card-${p.id}">
-      <span class="product-emoji">${p.emoji}</span>
+      <img class="product-img"
+     src="/images/${p.id.toLowerCase()}.jpg"
+     alt="${p.name}"
+     loading="lazy"
+     onerror="this.style.display='none'">
       <div class="product-category">${p.category}</div>
       <div class="product-name">${p.name}</div>
       <div class="product-price">$${p.price.toFixed(2)}</div>

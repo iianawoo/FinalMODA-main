@@ -46,6 +46,7 @@ public class ModaServer {
         server.createContext("/api/order", this::handleOrder);
         server.createContext("/api/orders", this::handleOrders);
         server.createContext("/api/discount", this::handleDiscount);
+        server.createContext("/images/",       this::serveImage);
 
         server.setExecutor(null);
         server.start();
@@ -69,6 +70,21 @@ public class ModaServer {
         }
         byte[] bytes = is.readAllBytes();
         ex.getResponseHeaders().set("Content-Type", "text/html; charset=UTF-8");
+        ex.sendResponseHeaders(200, bytes.length);
+        ex.getResponseBody().write(bytes);
+        ex.getResponseBody().close();
+    }
+
+    // ─── Serve Images ─────────────────────────────────────────────────────────
+
+    private void serveImage(HttpExchange ex) throws IOException {
+        if (!ex.getRequestMethod().equals("GET")) { ex.sendResponseHeaders(405, -1); return; }
+        String path = "/images/" + ex.getRequestURI().getPath().replaceAll(".*/images/", "");
+        InputStream is = getClass().getResourceAsStream(path);
+        if (is == null) { ex.sendResponseHeaders(404, -1); return; }
+        byte[] bytes = is.readAllBytes();
+        String contentType = path.endsWith(".png") ? "image/png" : "image/jpeg";
+        ex.getResponseHeaders().set("Content-Type", contentType);
         ex.sendResponseHeaders(200, bytes.length);
         ex.getResponseBody().write(bytes);
         ex.getResponseBody().close();
