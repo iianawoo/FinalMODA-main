@@ -14,6 +14,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
+import java.util.Locale;
 
 /**
  * Простой HTTP-сервер на встроенном com.sun.net.httpserver.
@@ -90,6 +91,7 @@ public class ModaServer {
         ex.getResponseBody().close();
     }
 
+
     // ─── GET /api/products ───────────────────────────────────────────────────
 
     private void handleProducts(HttpExchange ex) throws IOException {
@@ -107,7 +109,7 @@ public class ModaServer {
         StringBuilder json = new StringBuilder("[");
         for (int i = 0; i < products.size(); i++) {
             Product p = products.get(i);
-            json.append(String.format(
+            json.append(String.format(Locale.US,
                     "{\"id\":\"%s\",\"name\":\"%s\",\"category\":\"%s\",\"price\":%.2f,\"emoji\":\"%s\"}",
                     p.getId(), escape(p.getName()), p.getCategory(), p.getPrice(), p.getEmoji()));
             if (i < products.size() - 1)
@@ -116,13 +118,17 @@ public class ModaServer {
         json.append("]");
         sendJson(ex, 200, json.toString());
     }
-
     // ─── POST /api/order (также GET → список всех заказов) ──────────────────
 
     private void handleOrder(HttpExchange ex) throws IOException {
         addCorsHeaders(ex);
+
+        // --- НОВОЕ: Логируем каждый пришедший запрос ---
+        System.out.println("[DEBUG] Incoming Request: " + ex.getRequestMethod() + " " + ex.getRequestURI());
+
         if (ex.getRequestMethod().equals("OPTIONS")) {
             ex.sendResponseHeaders(204, -1);
+            ex.getResponseBody().close(); // Важно закрыть поток для OPTIONS
             return;
         }
 
@@ -136,7 +142,8 @@ public class ModaServer {
         }
 
         String body = new String(ex.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
-        System.out.println("[DEBUG] Received body: " + body); // удобно для отладки в IntelliJ
+        System.out.println("[DEBUG] Received body: " + body);
+
 
         Map<String, String> params = parseJson(body);
 
@@ -245,13 +252,14 @@ public class ModaServer {
         StringBuilder items = new StringBuilder("[");
         for (int i = 0; i < o.getItems().size(); i++) {
             var item = o.getItems().get(i);
-            items.append(String.format("{\"name\":\"%s\",\"price\":%.2f}",
+            // Используем Locale.US для точки вместо запятой
+            items.append(String.format(Locale.US, "{\"name\":\"%s\",\"price\":%.2f}",
                     escape(item.getName()), item.getPrice()));
             if (i < o.getItems().size() - 1)
                 items.append(",");
         }
         items.append("]");
-        return String.format(
+        return String.format(Locale.US,
                 "{\"id\":\"%s\",\"customerName\":\"%s\",\"address\":\"%s\"," +
                         "\"deliveryType\":\"%s\",\"giftWrap\":%b,\"totalPrice\":%.2f," +
                         "\"status\":\"%s\",\"items\":%s}",
@@ -260,11 +268,15 @@ public class ModaServer {
                 o.getStatus(), items);
     }
 
+
     private void addCorsHeaders(HttpExchange ex) {
         ex.getResponseHeaders().set("Access-Control-Allow-Origin", "*");
         ex.getResponseHeaders().set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-        ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type");
+        ex.getResponseHeaders().set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+        // Разрешаем браузеру запомнить CORS-настройки на час
+        ex.getResponseHeaders().set("Access-Control-Max-Age", "3600");
     }
+
 
     private void sendJson(HttpExchange ex, int code, String body) throws IOException {
         byte[] bytes = body.getBytes(StandardCharsets.UTF_8);

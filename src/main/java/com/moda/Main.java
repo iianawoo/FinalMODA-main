@@ -5,7 +5,7 @@ import com.moda.server.ModaServer;
 /**
  * Точка входа в приложение.
  *
- * Запускает HTTP-сервер на порту 8080.
+ * Запускает HTTP-сервер.
  */
 public class Main {
     public static void main(String[] args) throws Exception {

@@ -686,7 +686,8 @@
 </main>
 
 <script>
-const API = '/api';
+  const API = window.location.port === '8083' ? '/api' : 'http://localhost:8083/api';
+  console.log(`[DEBUG] Используемый API: ${API}`);
 let allProducts = [];
 let cart = []; // [{id, name, price, emoji}]
 let discountedTotal = null;
@@ -874,47 +875,82 @@ function saveOrders() {
   localStorage.setItem('modaOrders', JSON.stringify(localOrders));
 }
 
-function placeOrder() {
+async function placeOrder() {
   const name    = document.getElementById('customerName').value.trim();
   const address = document.getElementById('address').value.trim();
+  const promo   = document.getElementById('promoCode').value.trim();
+
   if (!name || !address) { showToast('Please fill your name and address'); return; }
   if (cart.length === 0) { showToast('Your cart is empty'); return; }
 
   const delivery = document.getElementById('delExpress').checked ? 'express' : 'standard';
   const giftWrap = document.getElementById('giftWrap').checked;
+  const productIds = cart.map(i => i.id).join(',');
 
   const btn = document.getElementById('placeBtn');
   btn.disabled = true; btn.textContent = 'Placing order...';
 
-  const subtotal = cart.reduce((s,i) => s+i.price, 0);
-  const deliveryCost = delivery === 'express' ? 14.99 : 5.99;
-  const wrapCost = giftWrap ? 3.99 : 0;
-  const itemsTotal = discountedTotal !== null ? discountedTotal : subtotal;
-  const totalPrice = itemsTotal + deliveryCost + wrapCost;
+  try {
+    const res = await fetch(`${API}/order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        customerName: name,
+        address: address,
+        productIds: productIds,
+        deliveryType: delivery,
+        giftWrap: giftWrap,
+        promoCode: promo
+      })
+    });
 
-  const order = {
-    id: Date.now().toString(36).toUpperCase(),
-    customerName: name,
-    address: address,
-    items: cart.map(i => ({name: i.name, price: i.price})),
-    deliveryType: delivery,
-    giftWrap: giftWrap,
-    totalPrice: Math.round(totalPrice * 100) / 100,
-    status: 'PENDING'
-  };
+    if (!res.ok) throw new Error('Server error');
 
-  localOrders.unshift(order);
-  saveOrders();
+    const serverOrder = await res.json();
+    localOrders.unshift(serverOrder);
+    saveOrders();
 
-  cart = [];
-  discountedTotal = null;
-  appliedPromo = '';
-  updateCartUI();
-  document.getElementById('modalOrderId').textContent = '#' + order.id;
-  document.getElementById('modalOverlay').classList.add('open');
+    cart = [];
+    discountedTotal = null;
+    appliedPromo = '';
+    updateCartUI();
+    document.getElementById('modalOrderId').textContent = '#' + serverOrder.id;
+    document.getElementById('modalOverlay').classList.add('open');
+    showToast('✨ Order sent to server!');
 
-  btn.disabled = false; btn.textContent = 'Place Order 🌸';
+  } catch(e) {
+    console.error("ОШИБКА ПРИ СОЗДАНИИ ЗАКАЗА:", e);
+    // FALLBACK
+    const subtotal = cart.reduce((s,i) => s+i.price, 0);
+    const deliveryCost = delivery === 'express' ? 14.99 : 5.99;
+    const wrapCost = giftWrap ? 3.99 : 0;
+    const itemsTotal = discountedTotal !== null ? discountedTotal : subtotal;
+    const totalPrice = itemsTotal + deliveryCost + wrapCost;
+
+    const order = {
+      id: "LOC-" + Date.now().toString(36).toUpperCase(),
+      customerName: name,
+      address: address,
+      items: cart.map(i => ({name: i.name, price: i.price})),
+      deliveryType: delivery,
+      giftWrap: giftWrap,
+      totalPrice: Math.round(totalPrice * 100) / 100,
+      status: 'PENDING'
+    };
+
+    localOrders.unshift(order);
+    saveOrders();
+
+    cart = [];
+    updateCartUI();
+    document.getElementById('modalOrderId').textContent = '#' + order.id;
+    document.getElementById('modalOverlay').classList.add('open');
+    showToast('⚠️ Server offline, saved locally');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Place Order 🌸';
+  }
 }
+
 
 function closeModal() {
   document.getElementById('modalOverlay').classList.remove('open');
@@ -922,13 +958,37 @@ function closeModal() {
 }
 
 // ── Orders ────────────────────────────────────────────────────────────────────
-function loadOrders() {
-  const list = document.getElementById('ordersList');
-  if (!localOrders.length) {
-    list.innerHTML = '<p style="color:var(--muted);text-align:center;padding:40px">No orders yet 🌸</p>';
-    return;
-  }
-  list.innerHTML = localOrders.map(o => `
+  async function loadOrders() {
+    const list = document.getElementById('ordersList');
+
+    // --- НОВОЕ: Пытаемся синхронизировать заказы с сервером ---
+    try {
+      const res = await fetch(`${API}/orders`);
+      if (res.ok) {
+        const serverOrders = await res.json();
+        // Добавляем серверные заказы в наш список, если их там нет
+        serverOrders.forEach(so => {
+          const exists = localOrders.find(lo => lo.id === so.id);
+          if (!exists) localOrders.unshift(so);
+        });
+        saveOrders();
+      }
+    } catch(e) { console.log("Синхронизация не удалась, работаем локально"); }
+
+    if (!localOrders.length) {
+      list.innerHTML = `
+      <p style="color:var(--muted);text-align:center;padding:40px">No orders yet 🌸</p>
+    `;
+      return;
+    }
+
+    // Добавляем кнопку очистки в начало списка
+    let html = `<button onclick="localStorage.removeItem('modaOrders'); localOrders=[]; loadOrders();"
+               style="margin-bottom:20px; padding:8px 16px; background:#f5ede8; border:1px solid #d4b5a8; border-radius:10px; cursor:pointer; color:#9e7a6a; font-size:0.8rem;">
+               🗑 Очистить историю (удалить старые заказы)
+               </button>`;
+
+    html += localOrders.map(o => `
     <div class="order-card ${o.status}" id="order-${o.id}">
       <div class="order-top">
         <div class="order-id">
@@ -939,7 +999,6 @@ function loadOrders() {
       </div>
       <div class="order-details">
         ${o.items.map(i => `${i.name} ($${i.price.toFixed(2)})`).join(' · ')}
-        ${o.giftWrap ? ' · 🎀 Gift Wrap' : ''}
         · ${o.deliveryType === 'express' ? '🚀 Express' : '📦 Standard'}
       </div>
       <div class="order-price">$${o.totalPrice.toFixed(2)}</div>
@@ -947,24 +1006,57 @@ function loadOrders() {
         <select class="status-select" id="sel-${o.id}">
           ${['PENDING','CONFIRMED','SHIPPED','DELIVERED','CANCELLED'].map(s =>
             `<option value="${s}" ${s===o.status?'selected':''}>${s}</option>`
-          ).join('')}
+    ).join('')}
         </select>
         <button class="update-status-btn" onclick="updateStatus('${o.id}')">Update Status</button>
       </div>
     </div>
   `).join('');
-}
 
-function updateStatus(orderId) {
+    list.innerHTML = html;
+  }
+
+
+async function updateStatus(orderId) {
   const status = document.getElementById(`sel-${orderId}`).value;
+  console.log(`[DEBUG] Updating status for ${orderId} to ${status}...`);
+
   const order = localOrders.find(o => o.id === orderId);
-  if (order) {
+  if (!order) return;
+
+  try {
+    const res = await fetch(`${API}/order`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        orderId: orderId,
+        status: status
+      })
+    });
+
+    if (res.ok) {
+      const serverOrder = await res.json();
+      console.log(`[DEBUG] Server responded:`, serverOrder);
+      // Синхронизируем локальный объект с тем, что вернул сервер
+      Object.assign(order, serverOrder);
+      saveOrders();
+      loadOrders();
+      showToast(`✅ Server: Status updated to ${status}`);
+    } else {
+      const errorText = await res.text();
+      console.error(`[ERROR] Server returned ${res.status}: ${errorText}`);
+      throw new Error('Server error');
+    }
+  } catch(e) {
+    console.error(`[ERROR] Fetch failed:`, e);
+    // FALLBACK: если сервер недоступен, меняем только локально
     order.status = status;
     saveOrders();
-    showToast(`Status updated to ${status}`);
     loadOrders();
+    showToast(`⚠️ Local: Status updated (Server unreachable)`);
   }
 }
+
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 function showToast(msg) {
